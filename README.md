@@ -1,5 +1,9 @@
 # Logly
 
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/LayerDynamics/logly/releases)
+
 A lightweight, minimal-dependency log aggregation and system monitoring tool designed for AWS EC2 instances running Django/PostgreSQL applications.
 
 ## Overview
@@ -11,6 +15,19 @@ Logly solves the problem of AWS EC2 instances only retaining logs for 24 hours b
 - Log events (fail2ban, syslog, auth.log, custom application logs)
 
 All data is stored in an optimized SQLite database with time-series indexing for fast queries and easy export.
+
+## What's New in v0.1.0
+
+🎉 Initial release with comprehensive monitoring and issue detection capabilities:
+
+- **Core Monitoring**: System metrics (CPU, memory, disk), network activity, and log aggregation
+- **Issue Detection**: Proactive identification of security threats, performance problems, and errors
+- **Query System**: Fluent API for querying metrics, logs, and generating health reports
+- **Health Scoring**: Overall system health assessment (0-100) with component breakdowns
+- **Threat Intelligence**: IP reputation tracking and brute force attack detection
+- **Multi-Platform**: Full support for Linux and macOS
+- **Export Options**: CSV, JSON, and human-readable summary reports
+- **Minimal Dependencies**: Only requires PyYAML for configuration
 
 ## Features
 
@@ -27,22 +44,63 @@ All data is stored in an optimized SQLite database with time-series indexing for
 - **🆕 Health Monitoring**: Comprehensive health scoring (0-100) with actionable recommendations
 - **🆕 Threat Intelligence**: IP reputation tracking and brute force attack detection
 
+## Requirements
+
+- **Python**: 3.8 or higher
+- **OS**: Linux (Ubuntu, Debian, RHEL, CentOS, Amazon Linux) or macOS 10.15+
+- **Dependencies**: PyYAML (automatically installed)
+- **Disk Space**: ~100MB for application + database storage
+- **Permissions**: Root access for reading system logs (optional for metrics only)
+
 ## Installation
+
+### Quick Install (Recommended)
+
+Download and install the latest release:
+
+```bash
+# Download latest release (Linux x86_64)
+curl -L -o logly.tar.gz https://github.com/LayerDynamics/logly/releases/latest/download/logly-linux-x86_64.tar.gz
+
+# Extract
+tar -xzf logly.tar.gz
+cd logly
+
+# Install (creates virtualenv and sets up systemd service)
+sudo ./logly.sh install
+
+# Start the service
+sudo systemctl start logly
+```
+
+### From PyPI (when published)
+
+```bash
+# Install from PyPI
+pip install logly
+
+# Or with pipx (recommended for CLI tools)
+pipx install logly
+```
 
 ### From Source
 
 ```bash
-# Clone or copy the repository
+# Clone the repository
+git clone https://github.com/LayerDynamics/logly.git
 cd logly
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt
 
-# Install logly
+# Install in development mode
 pip install -e .
+
+# Or use the control script
+./logly.sh install --dev
 ```
 
-### System Installation
+### System Installation (Manual)
 
 ```bash
 # Install to system Python
@@ -52,13 +110,29 @@ sudo pip install .
 sudo mkdir -p /etc/logly
 sudo cp config/logly.yaml /etc/logly/
 
-# Copy systemd service
+# Copy systemd service (Linux only)
 sudo cp systemd/logly.service /etc/systemd/system/
 
 # Enable and start service
 sudo systemctl daemon-reload
 sudo systemctl enable logly
 sudo systemctl start logly
+```
+
+### macOS Installation
+
+```bash
+# Download latest release (macOS)
+# For Intel Macs:
+curl -L -o logly.tar.gz https://github.com/LayerDynamics/logly/releases/latest/download/logly-macos-x86_64.tar.gz
+
+# For Apple Silicon (M1/M2):
+curl -L -o logly.tar.gz https://github.com/LayerDynamics/logly/releases/latest/download/logly-macos-arm64.tar.gz
+
+# Extract and install
+tar -xzf logly.tar.gz
+cd logly
+./logly.sh install
 ```
 
 ## Configuration
@@ -253,6 +327,7 @@ logly query security --hours 48
 ```
 
 Features:
+
 - Brute force attack detection (5+ failed logins from same IP)
 - High-threat IP identification (threat score ≥ 70)
 - Failed login tracking
@@ -269,6 +344,7 @@ logly query performance --hours 72
 ```
 
 Detects:
+
 - Sustained high CPU usage (>85% for 5+ minutes)
 - High memory pressure (>90%)
 - Low disk space (<10% free)
@@ -283,6 +359,7 @@ logly query errors --hours 168  # Last week
 ```
 
 Features:
+
 - Error spike detection (3x baseline rate)
 - Recurring error identification
 - Critical error alerting
@@ -302,6 +379,7 @@ logly query ips --threshold 80 -o threats.json
 ```
 
 Shows:
+
 - IP threat scores (0-100)
 - Failed login counts per IP
 - Ban history
