@@ -1,0 +1,121 @@
+# Logly Configuration File
+# NOTE: Database and log paths are HARDCODED and cannot be changed
+# - Database: logly/db/logly.db (auto-detected using project root)
+# - Logs: logly/logs/ (auto-detected using project root)
+
+# Database settings
+database:
+  path: "logly/db/logly.db"  # HARDCODED - Auto-detected, cannot be changed
+  retention_days: 90  # Keep data for 90 days before cleanup
+
+# Collection intervals (in seconds)
+collection:
+  system_metrics: 60      # Collect CPU, memory, disk every minute
+  network_metrics: 60     # Collect network stats every minute
+  log_parsing: 300        # Parse logs every 5 minutes
+
+# System metrics collection
+system:
+  enabled: true
+  metrics:
+    - cpu_percent
+    - cpu_count
+    - memory_total
+    - memory_available
+    - memory_percent
+    - disk_usage
+    - disk_io
+    - load_average
+
+# Network monitoring
+network:
+  enabled: true
+  metrics:
+    - bytes_sent
+    - bytes_recv
+    - packets_sent
+    - packets_recv
+    - connections
+    - listening_ports
+
+# Log file parsing
+logs:
+  enabled: true
+  sources:
+    fail2ban:
+      path: "/var/log/fail2ban.log"
+      enabled: true
+    syslog:
+      path: "/var/log/syslog"
+      enabled: true
+    auth:
+      path: "/var/log/auth.log"
+      enabled: true
+    django:
+      path: "/var/log/django/django.log"
+      enabled: false  # Enable if you have Django logs
+    nginx:
+      path: "/var/log/nginx/access.log"
+      enabled: false  # Enable if you have nginx
+
+# Aggregation settings
+aggregation:
+  enabled: true
+  intervals:
+    - hourly    # Aggregate data by hour
+    - daily     # Aggregate data by day
+  keep_raw_data_days: 7  # Keep raw data for 7 days, then only aggregates
+
+# Export settings
+export:
+  default_format: "csv"  # csv or json
+  timestamp_format: "%Y-%m-%d %H:%M:%S"
+
+# Tracing configuration
+tracing:
+  enabled: true
+  trace_processes: true      # Track process information
+  trace_network: true        # Track network connections
+  trace_ips: true           # Track IP reputation and behavior
+  trace_errors: true        # Deep error analysis
+
+  # Trace storage settings
+  store_traces: true        # Store traces in database
+  trace_high_severity_only: false  # Only trace events with severity >= 50
+  min_severity_to_store: 30  # Minimum severity to store (0-100)
+
+  # IP reputation
+  ip_whitelist:
+    - "127.0.0.1"
+    - "192.168.1.1"
+
+  ip_blacklist: []
+
+  auto_blacklist_threshold: 70  # Auto-blacklist IPs with threat score >= 70
+
+# Query and issue detection settings
+query:
+  enabled: true
+
+  # Issue detection thresholds
+  thresholds:
+    high_cpu_percent: 85           # CPU usage % to trigger high CPU alert
+    high_memory_percent: 90        # Memory usage % to trigger high memory alert
+    disk_space_critical: 90        # Disk usage % to trigger disk space alert
+    error_spike_multiplier: 3.0    # Error rate must be Nx baseline to detect spike
+    failed_login_threshold: 5      # Minimum failed logins to detect brute force
+    threat_score_high: 70          # IP threat score threshold for high-threat classification
+    network_error_rate: 5.0        # Network error rate % threshold
+    sustained_duration_min: 300    # Minimum duration (seconds) for sustained high usage
+
+  # Analysis windows (defaults)
+  default_time_window: 24          # Default hours for analysis
+  trend_analysis_days: 7           # Days for trend analysis
+
+  # Alert configuration
+  alert_cooldown: 3600             # Seconds before repeating the same alert
+
+# Logging (for the logly app itself)
+logging:
+  level: "INFO"  # Only affects console output, files always log verbosely
+  log_dir: "logly/logs"  # HARDCODED - Auto-detected, cannot be changed

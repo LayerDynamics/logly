@@ -1,0 +1,21 @@
+[Unit]
+Description=Logly - Log Aggregation and System Monitoring
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/logly
+ExecStart=/usr/bin/python3 -m logly start --config /etc/logly/logly.yaml
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=logly
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

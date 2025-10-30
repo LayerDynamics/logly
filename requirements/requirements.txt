@@ -1,0 +1,7 @@
+# Minimal dependencies for Logly
+# PyYAML for configuration management (could be replaced with json if needed)
+pyyaml>=6.0
+
+# Development dependencies (optional)
+# pytest>=7.0
+# pytest-cov>=4.0
