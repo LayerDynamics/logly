@@ -1,0 +1,234 @@
+name: Linux Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux Release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+          pip install -r requirements/requirements.txt
+          pip install -r requirements/requirements-dev.txt
+
+      - name: Run tests
+        run: |
+          pip install -e .
+          pytest tests/ -v --cov=logly
+
+      - name: Build distribution packages
+        run: |
+          python -m build
+
+      - name: Create release tarball
+        run: |
+          # Create installation directory structure
+          mkdir -p logly-release/logly
+          cp -r logly/* logly-release/logly/
+          cp -r config logly-release/
+          cp -r systemd logly-release/
+          cp -r requirements logly-release/
+          cp setup.py pyproject.toml README.md LICENSE logly-release/ 2>/dev/null || true
+          cp logly.sh logly-release/
+          chmod +x logly-release/logly.sh
+
+          # Create tarball
+          tar -czf logly-linux-python${{ matrix.python-version }}.tar.gz -C logly-release .
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: logly-linux-python${{ matrix.python-version }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            logly-linux-python${{ matrix.python-version }}.tar.gz
+          retention-days: 7
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-linux
+    runs-on: ubuntu-latest
+    if: (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && github.event_name != 'workflow_call'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "*.whl" -exec cp {} release-assets/ \;
+          find artifacts -name "*.tar.gz" -exec cp {} release-assets/ \;
+
+          # Generate checksums
+          cd release-assets
+          sha256sum * > SHA256SUMS
+
+      - name: Create release notes
+        id: release_notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## Logly ${{ steps.version.outputs.VERSION }} - Linux Release
+
+          Lightweight log aggregation and system monitoring for Linux servers and AWS EC2 instances.
+
+          ### Installation
+
+          **Quick Install (Python 3.8+)**:
+          ```bash
+          # Download and extract
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/logly-linux-python3.11.tar.gz
+          tar -xzf logly-linux-python3.11.tar.gz
+          cd logly
+
+          # Install
+          ./logly.sh install
+
+          # Start service
+          ./logly.sh start
+          ```
+
+          **Python Package Install**:
+          ```bash
+          pip install https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/logly-${{ steps.version.outputs.VERSION }}-py3-none-any.whl
+          ```
+
+          ### Python Version Support
+
+          This release includes builds for:
+          - Python 3.8
+          - Python 3.9
+          - Python 3.10
+          - Python 3.11
+
+          ### System Requirements
+
+          - Linux kernel 2.6+ (for /proc filesystem)
+          - Python 3.8 or higher
+          - 100MB disk space minimum
+          - Root or sudo access for system-wide installation
+
+          ### Features
+
+          - System metrics collection (CPU, memory, disk, load)
+          - Network activity monitoring
+          - Log aggregation (syslog, auth.log, fail2ban, nginx, custom logs)
+          - SQLite-based time-series storage
+          - Issue detection and health monitoring
+          - CSV/JSON export capabilities
+          - Systemd service integration
+
+          ### Verify Download
+
+          ```bash
+          sha256sum -c SHA256SUMS
+          ```
+
+          ### Documentation
+
+          See [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions.
+
+          ### Support
+
+          Report issues at: https://github.com/${{ github.repository }}/issues
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: Logly ${{ steps.version.outputs.VERSION }} (Linux)
+          body_path: release-notes.md
+          files: |
+            release-assets/*
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, 'alpha') || contains(steps.version.outputs.VERSION, 'beta') || contains(steps.version.outputs.VERSION, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-installation:
+    name: Test Installation
+    needs: build-linux
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.11']
+
+    steps:
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: logly-linux-python${{ matrix.python-version }}
+
+      - name: Test wheel installation
+        run: |
+          pip install dist/*.whl
+          logly --help
+          python -c "import logly; print('Logly imported successfully')"
+
+      - name: Test tarball installation
+        run: |
+          # Clean previous install
+          pip uninstall -y logly
+
+          # Extract and install from tarball
+          mkdir test-install
+          tar -xzf logly-linux-python${{ matrix.python-version }}.tar.gz -C test-install
+          cd test-install
+
+          # Test control script
+          ./logly.sh help
+
+          echo "Installation test passed for Python ${{ matrix.python-version }}"

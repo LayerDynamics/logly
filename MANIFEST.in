@@ -1,0 +1,48 @@
+# MANIFEST.in - Package distribution manifest
+# Controls which files are included in the source distribution
+
+# Include critical project files
+include README.md
+include LICENSE
+include CHANGELOG.md
+include pyproject.toml
+include setup.py
+
+# Include requirements
+recursive-include requirements *.txt
+
+# Include configuration files
+recursive-include config *.yml *.yaml *.json
+
+# Include systemd service files
+recursive-include systemd *.service
+
+# Include control script
+include logly.sh
+
+# Include all Python source files and SQL schema
+recursive-include logly *.py *.sql
+
+# Exclude test files from distribution
+recursive-exclude tests *
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * .pytest_cache
+
+# Exclude development and build artifacts
+exclude .gitignore
+exclude .github
+exclude environment.yml
+exclude .coveragerc
+recursive-exclude .github *
+recursive-exclude db *
+recursive-exclude logs *
+recursive-exclude .venv *
+recursive-exclude build *
+recursive-exclude dist *
+recursive-exclude *.egg-info *
+
+# Exclude macOS and editor files
+global-exclude .DS_Store
+global-exclude *.swp
+global-exclude *~

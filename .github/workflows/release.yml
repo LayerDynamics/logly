@@ -1,1 +1,218 @@
-e
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        type: string
+      release_linux:
+        description: 'Release Linux build'
+        required: false
+        type: boolean
+        default: true
+      release_macos:
+        description: 'Release macOS build'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      is_prerelease: ${{ steps.version.outputs.IS_PRERELEASE }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+          # Check if prerelease
+          if [[ "$VERSION" =~ (alpha|beta|rc) ]]; then
+            echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
+          else
+            echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Release version: $VERSION"
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+(\.[0-9]+)?)?$ ]]; then
+            echo "Invalid version format: $VERSION"
+            echo "Expected format: vX.Y.Z or vX.Y.Z-alpha.N, vX.Y.Z-beta.N, vX.Y.Z-rc.N"
+            exit 1
+          fi
+          echo "Version format is valid"
+
+      - name: Check version in pyproject.toml
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          VERSION_NO_V="${VERSION#v}"
+
+          PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+
+          echo "Git tag version: $VERSION_NO_V"
+          echo "pyproject.toml version: $PYPROJECT_VERSION"
+
+          if [ "$PYPROJECT_VERSION" != "$VERSION_NO_V" ]; then
+            echo "Warning: Version mismatch between git tag and pyproject.toml"
+          fi
+
+  trigger-linux:
+    name: Trigger Linux Release
+    needs: validate
+    if: |
+      always() &&
+      needs.validate.result == 'success' &&
+      (github.event_name == 'push' || inputs.release_linux)
+    uses: ./.github/workflows/linux.yml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+    secrets: inherit
+
+  trigger-macos:
+    name: Trigger macOS Release
+    needs: validate
+    if: |
+      always() &&
+      needs.validate.result == 'success' &&
+      (github.event_name == 'push' || inputs.release_macos)
+    uses: ./.github/workflows/macos.yml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+    secrets: inherit
+
+  create-unified-release:
+    name: Create Unified Release
+    needs: [validate, trigger-linux, trigger-macos]
+    runs-on: ubuntu-latest
+    if: always() && needs.validate.result == 'success'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate unified release notes
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          IS_PRERELEASE="${{ needs.validate.outputs.is_prerelease }}"
+
+          cat > unified-release-notes.md << 'NOTES'
+          ## Logly - Multi-Platform Release
+
+          Lightweight log aggregation and system monitoring tool for Linux and macOS.
+
+          ### Quick Start
+
+          **Linux (Ubuntu/Debian/AWS EC2)**:
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/VERSION_TAG/logly-linux-python3.11.tar.gz
+          tar -xzf logly-linux-python3.11.tar.gz
+          cd logly
+          ./logly.sh install
+          ./logly.sh start
+          ```
+
+          **macOS (Intel)**:
+          ```bash
+          curl -L -o logly-macos.tar.gz https://github.com/${{ github.repository }}/releases/download/VERSION_TAG/logly-macos-python3.11-x86_64.tar.gz
+          tar -xzf logly-macos.tar.gz
+          cd logly
+          ./logly.sh install
+          ./logly.sh start
+          ```
+
+          **macOS (Apple Silicon)**:
+          ```bash
+          curl -L -o logly-macos.tar.gz https://github.com/${{ github.repository }}/releases/download/VERSION_TAG/logly-macos-python3.11-arm64.tar.gz
+          tar -xzf logly-macos.tar.gz
+          cd logly
+          ./logly.sh install
+          ./logly.sh start
+          ```
+
+          ### Features
+
+          - System metrics collection (CPU, memory, disk, load)
+          - Network activity monitoring
+          - Log aggregation (syslog, auth.log, fail2ban, nginx, custom logs)
+          - Issue detection and health monitoring
+          - Threat intelligence and IP reputation tracking
+          - CSV/JSON export capabilities
+          - Minimal dependencies (only PyYAML)
+          - Time-series SQLite storage
+
+          ### System Requirements
+
+          **Linux**: Linux kernel 2.6+, Python 3.8+, 100MB disk space
+          **macOS**: macOS 10.15+, Python 3.8+, 100MB disk space
+
+          ### Documentation
+
+          - [README](https://github.com/${{ github.repository }}/blob/main/README.md)
+          - [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+
+          ### Support
+
+          Report issues: https://github.com/${{ github.repository }}/issues
+          NOTES
+
+          # Replace version placeholder
+          sed -i "s|VERSION_TAG|$VERSION|g" unified-release-notes.md
+
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            echo "" >> unified-release-notes.md
+            echo "---" >> unified-release-notes.md
+            echo "" >> unified-release-notes.md
+            echo "**Pre-release Notice**: This is a pre-release version. Use with caution." >> unified-release-notes.md
+          fi
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.validate.outputs.version }}
+          name: Logly ${{ needs.validate.outputs.version }}
+          body_path: unified-release-notes.md
+          draft: false
+          prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: Notify Release Complete
+    needs: [validate, create-unified-release]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Release summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version**: ${{ needs.validate.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Pre-release**: ${{ needs.validate.outputs.is_prerelease }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status**: ${{ needs.create-unified-release.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**URL**: https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.version }}" >> $GITHUB_STEP_SUMMARY

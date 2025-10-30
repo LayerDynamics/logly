@@ -53,3 +53,4 @@ Thumbs.db
 *.egg-info
 .pytest_cache
 __pycache__/
+dist

@@ -1,0 +1,448 @@
+name: macOS Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS Release
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+        arch: ['x86_64', 'arm64']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+          pip install -r requirements/requirements.txt
+          pip install -r requirements/requirements-dev.txt
+
+      - name: Run tests
+        run: |
+          pip install -e .
+          pytest tests/ -v --cov=logly
+
+      - name: Build distribution packages
+        run: |
+          python -m build
+
+      - name: Create release tarball
+        run: |
+          # Create installation directory structure
+          mkdir -p logly-release/logly
+          cp -r logly/* logly-release/logly/
+          cp -r config logly-release/
+          cp -r requirements logly-release/
+          cp setup.py pyproject.toml README.md LICENSE logly-release/ 2>/dev/null || true
+          cp logly.sh logly-release/
+          chmod +x logly-release/logly.sh
+
+          # Create macOS-specific LaunchAgent plist
+          mkdir -p logly-release/launchd
+          cat > logly-release/launchd/com.logly.agent.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>Label</key>
+              <string>com.logly.agent</string>
+              <key>ProgramArguments</key>
+              <array>
+                  <string>/usr/local/bin/logly</string>
+                  <string>start</string>
+                  <string>--config</string>
+                  <string>/usr/local/etc/logly/logly.yaml</string>
+              </array>
+              <key>RunAtLoad</key>
+              <true/>
+              <key>KeepAlive</key>
+              <true/>
+              <key>StandardOutPath</key>
+              <string>/usr/local/var/log/logly/stdout.log</string>
+              <key>StandardErrorPath</key>
+              <string>/usr/local/var/log/logly/stderr.log</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # Create installation instructions
+          cat > logly-release/INSTALL_MACOS.md << 'INSTALL'
+          # Logly macOS Installation
+
+          ## Quick Install
+
+          ```bash
+          # Install using control script (recommended)
+          ./logly.sh install
+
+          # Or install manually
+          pip install .
+          ```
+
+          ## LaunchAgent Setup (Auto-start on login)
+
+          ```bash
+          # Copy LaunchAgent plist
+          cp launchd/com.logly.agent.plist ~/Library/LaunchAgents/
+
+          # Load the agent
+          launchctl load ~/Library/LaunchAgents/com.logly.agent.plist
+
+          # Start immediately
+          launchctl start com.logly.agent
+          ```
+
+          ## System-wide Installation (requires sudo)
+
+          ```bash
+          # Install system-wide
+          sudo ./logly.sh install --system
+
+          # Copy LaunchDaemon
+          sudo cp launchd/com.logly.agent.plist /Library/LaunchDaemons/
+          sudo launchctl load /Library/LaunchDaemons/com.logly.agent.plist
+          ```
+
+          ## Usage
+
+          ```bash
+          # Start service
+          ./logly.sh start
+
+          # Check status
+          ./logly.sh status
+
+          # View logs
+          ./logly.sh logs
+
+          # Query system health
+          ./logly.sh query health --hours 24
+
+          # Stop service
+          ./logly.sh stop
+          ```
+
+          ## Uninstall
+
+          ```bash
+          # Unload LaunchAgent
+          launchctl unload ~/Library/LaunchAgents/com.logly.agent.plist
+          rm ~/Library/LaunchAgents/com.logly.agent.plist
+
+          # Uninstall
+          ./logly.sh uninstall
+          ```
+          INSTALL
+
+          # Create tarball with arch suffix
+          tar -czf logly-macos-python${{ matrix.python-version }}-${{ matrix.arch }}.tar.gz -C logly-release .
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: logly-macos-python${{ matrix.python-version }}-${{ matrix.arch }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            logly-macos-python${{ matrix.python-version }}-${{ matrix.arch }}.tar.gz
+          retention-days: 7
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-macos
+    runs-on: macos-latest
+    if: (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && github.event_name != 'workflow_call'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "*.whl" -exec cp {} release-assets/ \;
+          find artifacts -name "*.tar.gz" -exec cp {} release-assets/ \;
+
+          # Generate checksums
+          cd release-assets
+          shasum -a 256 * > SHA256SUMS
+
+      - name: Create release notes
+        id: release_notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## Logly ${{ steps.version.outputs.VERSION }} - macOS Release
+
+          Lightweight log aggregation and system monitoring for macOS systems.
+
+          ### Installation
+
+          **Intel Macs (x86_64)**:
+          ```bash
+          # Download and extract
+          curl -L -o logly-macos.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/logly-macos-python3.11-x86_64.tar.gz
+          tar -xzf logly-macos.tar.gz
+          cd logly
+
+          # Install
+          ./logly.sh install
+
+          # Start service
+          ./logly.sh start
+          ```
+
+          **Apple Silicon Macs (ARM64/M1/M2/M3)**:
+          ```bash
+          # Download and extract
+          curl -L -o logly-macos.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/logly-macos-python3.11-arm64.tar.gz
+          tar -xzf logly-macos.tar.gz
+          cd logly
+
+          # Install
+          ./logly.sh install
+
+          # Start service
+          ./logly.sh start
+          ```
+
+          **Python Package Install (Universal)**:
+          ```bash
+          pip install https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/logly-${{ steps.version.outputs.VERSION }}-py3-none-any.whl
+          ```
+
+          ### Python Version Support
+
+          This release includes builds for:
+          - Python 3.8
+          - Python 3.9
+          - Python 3.10
+          - Python 3.11
+
+          ### Architecture Support
+
+          - x86_64 (Intel Macs)
+          - arm64 (Apple Silicon - M1/M2/M3)
+
+          ### System Requirements
+
+          - macOS 10.15 (Catalina) or higher
+          - Python 3.8 or higher
+          - 100MB disk space minimum
+
+          ### Features
+
+          - System metrics collection (CPU, memory, disk, load)
+          - Network activity monitoring
+          - Log aggregation
+          - SQLite-based time-series storage
+          - Issue detection and health monitoring
+          - CSV/JSON export capabilities
+          - LaunchAgent/LaunchDaemon support for auto-start
+
+          ### LaunchAgent Setup
+
+          See `INSTALL_MACOS.md` in the tarball for detailed LaunchAgent configuration.
+
+          ### Verify Download
+
+          ```bash
+          shasum -a 256 -c SHA256SUMS
+          ```
+
+          ### Documentation
+
+          See [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions.
+
+          ### Support
+
+          Report issues at: https://github.com/${{ github.repository }}/issues
+
+          ### Notes
+
+          - macOS builds may have limited log parsing compared to Linux (no systemd logs)
+          - Some system metrics may require additional permissions
+          - For best results, grant Full Disk Access in System Preferences > Security & Privacy
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: Logly ${{ steps.version.outputs.VERSION }} (macOS)
+          body_path: release-notes.md
+          files: |
+            release-assets/*
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, 'alpha') || contains(steps.version.outputs.VERSION, 'beta') || contains(steps.version.outputs.VERSION, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-installation:
+    name: Test Installation
+    needs: build-macos
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.11']
+
+    steps:
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Detect architecture
+        id: arch
+        run: |
+          ARCH=$(uname -m)
+          echo "ARCH=$ARCH" >> $GITHUB_OUTPUT
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: logly-macos-python${{ matrix.python-version }}-${{ steps.arch.outputs.ARCH }}
+
+      - name: Test wheel installation
+        run: |
+          pip install dist/*.whl
+          logly --help
+          python -c "import logly; print('Logly imported successfully')"
+
+      - name: Test tarball installation
+        run: |
+          # Clean previous install
+          pip uninstall -y logly
+
+          # Extract and install from tarball
+          mkdir test-install
+          tar -xzf logly-macos-python${{ matrix.python-version }}-${{ steps.arch.outputs.ARCH }}.tar.gz -C test-install
+          cd test-install
+
+          # Test control script
+          ./logly.sh help
+
+          # Verify LaunchAgent plist exists
+          test -f launchd/com.logly.agent.plist
+          echo "LaunchAgent plist found"
+
+          # Verify installation instructions exist
+          test -f INSTALL_MACOS.md
+          echo "Installation instructions found"
+
+          echo "Installation test passed for Python ${{ matrix.python-version }} on ${{ steps.arch.outputs.ARCH }}"
+
+  create-universal-installer:
+    name: Create Universal Installer
+    needs: build-macos
+    runs-on: macos-latest
+    if: (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && github.event_name != 'workflow_call'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create universal installer script
+        run: |
+          cat > install-macos.sh << 'INSTALLER'
+          #!/bin/bash
+          # Logly Universal macOS Installer
+          set -e
+
+          VERSION="${VERSION:-${{ steps.version.outputs.VERSION }}}"
+          REPO="https://github.com/${{ github.repository }}"
+
+          # Detect architecture
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+              echo "Detected Intel Mac (x86_64)"
+              DOWNLOAD_ARCH="x86_64"
+          elif [ "$ARCH" = "arm64" ]; then
+              echo "Detected Apple Silicon Mac (arm64)"
+              DOWNLOAD_ARCH="arm64"
+          else
+              echo "Unsupported architecture: $ARCH"
+              exit 1
+          fi
+
+          # Detect Python version
+          PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          echo "Detected Python $PYTHON_VERSION"
+
+          # Download appropriate version
+          DOWNLOAD_URL="$REPO/releases/download/$VERSION/logly-macos-python$PYTHON_VERSION-$DOWNLOAD_ARCH.tar.gz"
+          echo "Downloading from: $DOWNLOAD_URL"
+
+          curl -L -o logly-macos.tar.gz "$DOWNLOAD_URL"
+          tar -xzf logly-macos.tar.gz
+          rm logly-macos.tar.gz
+
+          echo ""
+          echo "Logly downloaded successfully!"
+          echo ""
+          echo "To install, run:"
+          echo "  ./logly.sh install"
+          echo ""
+          echo "To start:"
+          echo "  ./logly.sh start"
+          echo ""
+          echo "See INSTALL_MACOS.md for LaunchAgent setup instructions."
+          INSTALLER
+
+          chmod +x install-macos.sh
+
+      - name: Upload universal installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: logly-macos-universal-installer
+          path: install-macos.sh
+          retention-days: 90

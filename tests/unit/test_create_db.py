@@ -416,6 +416,10 @@ class TestDatabaseCreation:
         try:
             with patch('logly.utils.create_db.get_db_path', return_value=db_path):
                 with patch('logly.utils.create_db.get_db_dir', return_value=db_dir):
+                    # Root user can write to read-only directories, skip this test
+                    if os.geteuid() == 0:
+                        pytest.skip("Running as root - cannot test permission errors")
+
                     with pytest.raises((sqlite3.Error, OSError, PermissionError)):
                         create_database()
         finally:

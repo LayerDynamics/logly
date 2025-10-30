@@ -116,7 +116,7 @@ class IssueDetector:
                 "details": period.__dict__,
             })
 
-        high_memory = self.find_high_memory_periods(hours=hours)
+        high_memory = self.find_high_memory_periods(hours=hours, start_time=start_time, end_time=end_time)
         for period in high_memory:
             all_issues.append({
                 "type": "high_memory",
@@ -491,6 +491,8 @@ class IssueDetector:
         threshold: Optional[float] = None,
         duration: Optional[int] = None,
         hours: int = 24,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> List[HighUsagePeriod]:
         """
         Find periods of sustained high memory usage.
@@ -498,7 +500,9 @@ class IssueDetector:
         Args:
             threshold: Memory percentage threshold (default: from config)
             duration: Minimum sustained duration in seconds (default: from config)
-            hours: Time window to analyze
+            hours: Time window to analyze (used if start_time/end_time not provided)
+            start_time: Optional explicit start timestamp
+            end_time: Optional explicit end timestamp
 
         Returns:
             List of HighUsagePeriod objects
@@ -513,6 +517,8 @@ class IssueDetector:
             duration=duration_value,
             hours=hours,
             resource_type="memory",
+            start_time=start_time,
+            end_time=end_time,
         )
 
     def _find_high_resource_periods(
@@ -583,16 +589,16 @@ class IssueDetector:
                 if current_period is not None:
                     # End current period
                     period_duration = current_period["end"] - current_period["start"]
-                    # Accept if duration meets threshold OR we have minimum number of samples
-                    if period_duration >= duration or len(current_period["values"]) >= min_samples:
+                    # Accept if duration requirement is met (or disabled) AND we have minimum number of samples
+                    if (duration == 0 or period_duration >= duration) and len(current_period["values"]) >= min_samples:
                         periods.append(current_period)
                     current_period = None
 
         # Don't forget the last period
         if current_period is not None:
             period_duration = current_period["end"] - current_period["start"]
-            # Accept if duration meets threshold OR we have minimum number of samples
-            if period_duration >= duration or len(current_period["values"]) >= min_samples:
+            # Accept if duration requirement is met (or disabled) AND we have minimum number of samples
+            if (duration == 0 or period_duration >= duration) and len(current_period["values"]) >= min_samples:
                 periods.append(current_period)
 
         # Create HighUsagePeriod objects
