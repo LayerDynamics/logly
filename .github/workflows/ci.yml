@@ -120,7 +120,7 @@ jobs:
 
       - name: Verify package imports
         run: |
-          python -c "from logly.collectors import SystemMetrics"
+          python -c "from logly.collectors import SystemMetricsCollector"
           python -c "from logly.storage import SQLiteStore"
           python -c "from logly.query import QueryBuilder"
           python -c "from logly.core import Config, Scheduler"
