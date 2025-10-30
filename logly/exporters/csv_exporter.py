@@ -5,6 +5,7 @@ CSV exporter for metrics and log events
 import csv
 import logging
 from datetime import datetime
+from typing import Optional
 
 from logly.storage.sqlite_store import SQLiteStore
 
@@ -91,8 +92,8 @@ class CSVExporter:
         output_path: str,
         start_time: int,
         end_time: int,
-        source: str | None = None,
-        level: str | None = None,
+        source: Optional[str] = None,
+        level: Optional[str] = None,
     ):
         """
         Export log events to CSV

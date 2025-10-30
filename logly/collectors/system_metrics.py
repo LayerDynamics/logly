@@ -7,7 +7,7 @@ import os
 import platform
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from logly.collectors.base_collector import BaseCollector
 from logly.storage.models import SystemMetric
@@ -79,7 +79,7 @@ class SystemMetricsCollector(BaseCollector):
 
         return metric
 
-    def _get_cpu_stats(self) -> tuple[Optional[float], int]:
+    def _get_cpu_stats(self) -> Tuple[Optional[float], int]:
         """
         Get CPU usage percentage and count
 
@@ -94,7 +94,7 @@ class SystemMetricsCollector(BaseCollector):
             logger.warning(f"Unsupported platform: {platform.system()}")
             return None, os.cpu_count() or 1
 
-    def _get_cpu_stats_linux(self) -> tuple[Optional[float], int]:
+    def _get_cpu_stats_linux(self) -> Tuple[Optional[float], int]:
         """Get CPU stats on Linux using /proc/stat"""
         try:
             # Read /proc/stat for CPU times
@@ -131,7 +131,7 @@ class SystemMetricsCollector(BaseCollector):
             logger.error(f"Error reading CPU stats: {e}")
             return None, 0
 
-    def _get_cpu_stats_macos(self) -> tuple[Optional[float], int]:
+    def _get_cpu_stats_macos(self) -> Tuple[Optional[float], int]:
         """Get CPU stats on macOS using top command (faster than iostat)"""
         try:
             # Get CPU count
@@ -331,7 +331,7 @@ class SystemMetricsCollector(BaseCollector):
             logger.error(f"Error reading disk I/O stats: {e}")
             return {"read_bytes": 0, "write_bytes": 0}
 
-    def _get_load_average(self) -> tuple[float, float, float]:
+    def _get_load_average(self) -> Tuple[float, float, float]:
         """
         Get system load average
 
